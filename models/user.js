@@ -8,8 +8,13 @@ const userSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: true,
-    unique: true
+    unique: true,
+    sparse: true  // Allows null values, ensures that null emails don't violate uniqueness
+  },
+  phone: {
+    type: String,
+    unique: true,
+    sparse: true  // Allows null values, ensures that null phones don't violate uniqueness
   },
   password: {
     type: String,
@@ -18,19 +23,6 @@ const userSchema = new mongoose.Schema({
   refreshToken: {
     type: String, 
     required: false,
-  },
-  otp: { 
-    type: String, 
-    required: true 
-  },
-  expiration: { 
-    type: Date, 
-    required: true 
-  }, 
-  otpVerified:{
-    type:Boolean,
-    required:false,
-    default: false
   }
 });
 

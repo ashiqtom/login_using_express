@@ -1,0 +1,75 @@
+signup:
+    post
+    localhost:4000/signup
+    {
+        "name":"a",
+        "email":"abc@g.com",
+        "phone":"1234567890",
+        "password":"a"
+    }
+
+
+verifyOtp:
+    post
+    localhost:4000/verify-otp
+    {
+        "email":"abc@g.com",
+        "phone":"1234567890",
+        "otp":"233643"
+    }
+
+
+resendOtp:
+    post
+    localhost:4000/resend-otp
+    {
+        "email":"abc@g.com",
+        "phone":"1234567890"
+    }
+
+
+login:
+    post
+    localhost:4000/login
+    {
+        "email":"abc@g.com",
+        "phone":"1234567890",
+        "password":"a"
+    }
+
+    response:
+        {
+            "accessToken": "frsojiojtgdfbdbdbjpjg6464644t6tgh46468t",
+            "refreshToken": "frsojiodfhbfgjtgjpjg6464644t6tgh46468t"
+        }
+
+refresh-token:
+    post
+    localhost:4000/refresh-token
+    {
+        "refreshToken": "djgjhhsawheeeeeeeeeeeeexcgnbhfeeeeeeeeeeeeeg"
+    }
+
+    response:
+        {
+            "accessToken": "djgjhhsawheeeeeeeeeeeeeeg.djgjhhsawxfgjmhjkykymb3s"
+        }
+
+
+profile:
+    get
+    localhost:4000/profile
+    auth :Bearer
+
+
+logout:
+    post
+    localhost:4000/logout
+    {
+        "refreshToken": "ehhrsfjhlkjfgadfsg;ardeehgj;oiahjegijjadgjjegtjvjeegg"
+    }
+
+    response:
+        {
+            "message": "Logged out successfully"
+        }

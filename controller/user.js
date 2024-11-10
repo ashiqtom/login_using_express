@@ -1,37 +1,78 @@
 const User = require('../models/user')
-const bcrypt=require('bcrypt')
+const Otp = require('../models/otp')
+const bcrypt=require('bcryptjs')
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { generateOtp, sendOtpEmail } = require('../services/otpService'); // Import the helper functions
 
+
+// Helper functions for validation
+const isValidEmail = (email) => {
+  const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}$/;
+  return emailRegex.test(email);
+};
+
+const isValidPhone = (phone) => {
+  const phoneRegex = /^[0-9]{10}$/; // Example for a 10-digit phone number
+  return phoneRegex.test(phone);
+};
+
 exports.signup=async(req,res)=>{
     try{
-        const { name, email, password } = req.body;
-        const user = await User.findOne({ email });
+      const { name, email, password, phone } = req.body;
+      
+      if (!email && !phone) {
+        return res.status(400).send('Email or phone number are required');
+      }
+      if (!name || !password) {
+        return res.status(400).send('name and passwoed are required');
+      }
 
-        if (user) {
-            return res.status(400).json({ err: 'Email already exists' });
-        }
 
+      // Validate email if provided
+      if (email && !isValidEmail(email)) {
+        return res.status(400).send('Invalid email format');
+      }
+
+      // Validate phone if provided
+      if (phone && !isValidPhone(phone)) {
+        return res.status(400).send('Invalid phone number format');
+      }
+      
+
+      // Check if the user already exists by either email or phone
+      const user = await User.findOne({ $or: [{ email }, { phone }] });
+
+      if (user) {
+        return res.status(400).json({ err: 'Email or phone number already exists' });
+      }
+      const otpRecord=await Otp.findOne({ $or: [{ email }, { phone }] });
+
+      if(otpRecord){
+        return res.status(400).json({err: "Email or phone number already used ,varify the email or phone or try after 5m"})
+      }
         // Generate OTP
         const otp = generateOtp();
         console.log('otp',otp)
-        const expiration = new Date();
-        expiration.setMinutes(expiration.getMinutes() + 5); // OTP expires in 5 minutes
-      
+
+
         const saltRounds = parseInt(process.env.saltRounds);
         const hashedPassword = await bcrypt.hash(password, saltRounds); // blowfish 
 
-        const newUser = new User({ 
+        const newUser = new Otp({ 
             name, 
-            email, 
+            email : email || null, 
+            phone:phone || null,
             password: hashedPassword ,
-            otp,
-            expiration,
+            otp
         });
         await newUser.save();
         
         // await sendOtpEmail(email, otp);
+
+
+        const userRecord =await Otp.findOne({email});
+        
 
         res.status(201).json({ message: 'Successfully created new user and OTP sent to your email'});
     } catch(err){
@@ -44,38 +85,53 @@ exports.signup=async(req,res)=>{
 // Endpoint to verify OTP
 exports.verifyOtp= async (req, res) => {
   try{
-    const { email, otp } = req.body;
+    const { email, otp,phone } = req.body;
 
-    if (!email || !otp) {
-      return res.status(400).send('Email and OTP are required');
+    if (!otp || (!email && !phone)) {
+      return res.status(400).send('Email or phone number and OTP are required');
     }
-  
-    // Find user
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).send('User not found');
+
+    
+    // Validate email if provided
+    if (email && !isValidEmail(email)) {
+      return res.status(400).send('Invalid email format');
     }
-  
-    // Find OTP record
-    const otpRecord = user.otp
+
+    // Validate phone if provided
+    if (phone && !isValidPhone(phone)) {
+      return res.status(400).send('Invalid phone number format');
+    }
+
+    let query = [{ otp: otp }];
+    if (email) query.email = email;
+    if (phone) query.phone = phone;
+
+    const otpRecord = await Otp.findOne({ $or: query });
+
     if (!otpRecord) {
-      return res.status(404).send('OTP not found');
+      return res.status(400).json({ message: 'Invalid OTP' });
     }
   
-    // Check OTP expiration
-    if (user.expiration < new Date()) {
-      return res.status(400).send('OTP has expired');
-    }
-    // Verify OTP
-    if (otpRecord === otp) {
+    // Check if OTP has expired manually (even though Mongoose will automatically remove it)
+    const otpExpirationTime = otpRecord.createdAt.getTime() + 5 * 60 * 1000; // Created at + 5 minutes
+    const currentTime = new Date().getTime();
 
-      user.otpVerified = true; // Set otpVerified to true
-      await user.save(); // Save the updated user
 
-      return res.status(200).send('OTP verified successfully');
-    } else {
-      return res.status(400).send('Invalid OTP');
+    if (currentTime > otpExpirationTime) {
+      return res.status(400).json({ message: 'OTP has expired' });
     }
+    
+    const newUser = new User({ 
+      name:otpRecord.name, 
+      email:otpRecord.email || null, 
+      phone:otpRecord.phone || null,
+      password: otpRecord.password ,
+    });
+    await newUser.save();
+    
+    await Otp.deleteOne({ _id: otpRecord._id });
+    
+    res.status(200).json({ message: 'OTP verified successfully and accont created' });
   } catch (err){
     console.error(err);
     res.status(500).json({ message: 'Server error' });
@@ -83,60 +139,117 @@ exports.verifyOtp= async (req, res) => {
 };
   
 
+// Resend OTP Endpoint
+exports.resendOtp = async (req, res) => {
+  try {
+    const { email, phone } = req.body;
+
+    // Check if email or phone number is provided
+    if (!email && !phone) {
+      return res.status(400).json({ message: 'Email or phone number is required' });
+    }
+
+
+    // Validate email if provided
+    if (email && !isValidEmail(email)) {
+      return res.status(400).send('Invalid email format');
+    }
+
+    // Validate phone if provided
+    if (phone && !isValidPhone(phone)) {
+      return res.status(400).send('Invalid phone number format');
+    }
+
+
+    let query = [];
+    if (email) query.email = email;
+    if (phone) query.phone = phone;
+
+    const otpRecord = await Otp.findOne({ $or: query });
+
+    if (!otpRecord) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const otp = generateOtp();
+    console.log('otp',otp)
+
+    // Update OTP record in the database
+    otpRecord.otp = otp;
+    otpRecord.createdAt = new Date();
+    await otpRecord.save();
+
+    // Optionally send the OTP to the user's email again (or via SMS if required)
+    // await sendOtpEmail(userRecord.email, newOtp);
+
+    return res.status(200).json({ message: 'OTP resent successfully to your email' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
 
 // Login user
 exports.login= async (req, res) => {
-    const { email, password } = req.body;
-  
-    try {
-        // Check if the user exists
-        const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(400).json({ message: 'Invalid email or password' });
-        }
+  const { email, password,phone } = req.body;
 
-        if(user.otpVerified==false){
-          return res.status(400).json({Message:"otp is not varified"})
-        }
-  
+  try {
+
+
+    // Validate email if provided
+    if (email && !isValidEmail(email)) {
+      return res.status(400).send('Invalid email format');
+    }
+
+    // Validate phone if provided
+    if (phone && !isValidPhone(phone)) {
+      return res.status(400).send('Invalid phone number format');
+    }
+
+    let query = [];
+    if (email) query.email = email;
+    if (phone) query.phone = phone;
+
+    const user = await User.findOne({ $or: query });
+
+    if (!user) {
+        return res.status(400).json({ message: 'Invalid email or password' });
+    }
+
     //   // Compare the password
     //   const isMatch = await user.matchPassword(password);
     //   if (!isMatch) {
     //     return res.status(400).json({ message: 'Invalid email or password' });
     //   }
 
-   
-        // Compare the password
-        const isMatch =  await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-        return res.status(400).json({ message: 'Invalid email or password' });
-        }
 
-
-        // Generate access token (JWT)
-        const accessToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-        // Generate refresh token (using a random string or some encryption)
-        const refreshToken = crypto.randomBytes(40).toString('hex');
-
-        // Store the refresh token securely in the database or cache
-        user.refreshToken = refreshToken;  // Assuming there's a `refreshToken` field in your User model
-        await user.save();
-
-        // Respond with both tokens
-        res.json({
-        accessToken,
-        refreshToken,
-        });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Server error' });
+    // Compare the password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Invalid email or password' });
     }
-  };
+
+    // Generate access token (JWT)
+    const accessToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    // Generate refresh token (using a random string or some encryption)
+    const refreshToken = crypto.randomBytes(40).toString('hex');
+
+    // Store the refresh token securely in the database or cache
+    user.refreshToken = refreshToken;  // Assuming there's a `refreshToken` field in your User model
+    await user.save();
+
+    // Respond with both tokens
+    res.status(201).json({accessToken, refreshToken});
+
+  } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: 'Server error' });
+  }
+};
 
 
-exports.refresh= async (req, res) => {
+exports.refreshToken= async (req, res) => {
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
